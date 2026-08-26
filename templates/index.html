@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Transcript Scraper</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>YouTube Transcript Scraper</h1>
+            <p class="subtitle">Get video transcripts or scrape entire channels for NotebookLM</p>
+        </header>
+
+        <main>
+            <div class="tabs">
+                <button type="button" class="tab-btn active" data-tab="video">Single Video</button>
+                <button type="button" class="tab-btn" data-tab="channel">Channel Scraper</button>
+            </div>
+
+            <div id="video-tab" class="tab-content active">
+                <form id="transcript-form">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="youtube-url" 
+                            placeholder="https://www.youtube.com/watch?v=..." 
+                            required
+                        >
+                        <button type="submit" id="get-transcript-btn">
+                            <span class="btn-text">Get Transcript</span>
+                            <span class="btn-loader" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="channel-tab" class="tab-content">
+                <form id="channel-form">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="channel-url" 
+                            placeholder="https://www.youtube.com/@ChannelName/videos" 
+                            required
+                        >
+                        <button type="submit" id="scrape-channel-btn">
+                            <span class="btn-text">Scrape Channel</span>
+                            <span class="btn-loader" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                    </div>
+                    <div class="channel-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="metadata-only" title="Get video list with URLs for NotebookLM paste (no transcripts)">
+                            Metadata only — table of URLs for NotebookLM
+                        </label>
+                        <label class="checkbox-label" id="fast-playlist-label" style="display: none;">
+                            <input type="checkbox" id="fast-playlist" title="One playlist fetch only—fast. Duration if YouTube sends it; views/comments usually empty">
+                            Fast playlist only (very fast; stats may be empty)
+                        </label>
+                        <span id="fast-playlist-hint" class="hint-text" style="display: none;">Titles and URLs are always filled. Length may appear; views and comment counts usually need the slower path (leave this unchecked).</span>
+                        <label class="checkbox-label" id="full-extraction-label" style="display: none;">
+                            <input type="checkbox" id="full-extraction" title="Fetch full metadata per video (slower, gets upload date, likes, channel, etc.)">
+                            Full extraction (slower, more metadata)
+                        </label>
+                        <span id="full-extraction-hint" class="hint-text" style="display: none;">~1–3 sec per video. Consider lowering Max videos.</span>
+                        <label>
+                            Max videos:
+                            <input type="number" id="max-videos" min="1" max="2000" value="200" title="Limit videos to process (1-2000). Leave high for full channel scrape.">
+                        </label>
+                        <label id="delay-label">
+                            Delay (sec):
+                            <input type="number" id="channel-delay" min="0" max="10" step="0.5" value="1.5" title="Delay between fetches to avoid rate limiting">
+                        </label>
+                        <label id="batch-size-label" style="display: none;">
+                            Batch size:
+                            <select id="batch-size" title="Videos per batch (full curriculum only)">
+                                <option value="50">50</option>
+                                <option value="100" selected>100</option>
+                                <option value="200">200</option>
+                            </select>
+                        </label>
+                    </div>
+                </form>
+                <div id="channel-progress" class="channel-progress" style="display: none;">
+                    <p id="channel-progress-text">Fetching transcript 0 of 0...</p>
+                    <div class="progress-bar"><div id="channel-progress-fill" class="progress-fill"></div></div>
+                </div>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+
+            <div id="transcript-container" class="transcript-container" style="display: none;">
+                <div class="transcript-header">
+                    <h2>Transcript</h2>
+                    <button id="copy-btn" class="copy-btn" title="Copy to clipboard">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span class="copy-text">Copy</span>
+                    </button>
+                </div>
+                <div id="transcript-text" class="transcript-text"></div>
+            </div>
+
+            <div id="channel-result-container" class="channel-result-container" style="display: none;">
+                <div class="transcript-header">
+                    <h2 id="channel-result-title">Channel Curriculum</h2>
+                    <div class="channel-result-actions">
+                        <button id="download-csv-btn" class="copy-btn" style="display: none;" title="Download as CSV file">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <span class="download-csv-text">Download CSV</span>
+                        </button>
+                        <button id="copy-urls-btn" class="copy-btn" style="display: none;" title="Copy URLs only (one per line) for NotebookLM paste">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span class="copy-urls-text">Copy URLs</span>
+                        </button>
+                        <button id="copy-channel-btn" class="copy-btn" title="Copy to clipboard">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span class="copy-channel-text">Copy Markdown</span>
+                        </button>
+                        <button id="load-next-btn" class="copy-btn" style="display: none;" title="Load next batch of videos and transcripts">
+                            <span class="load-next-text">Load next 100</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="channel-result-text" class="transcript-text"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+

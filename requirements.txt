@@ -1,0 +1,6 @@
+flask==3.0.0
+youtube-transcript-api>=1.2.3
+yt-dlp>=2024.1.0
+tqdm>=4.66.0
+
+
