@@ -1,90 +1,69 @@
-# YouTube Channel Corpus Scraper
+# YouTube Channel Corpus
 
-Pull transcripts and analysis-ready metadata from YouTube channels, and save them as a local corpus you can stop, resume, and feed to Claude / NotebookLM.
+A small local app that copies **YouTube captions** (the same text as **Show transcript** on a video) onto your computer.
 
-This started as a single-video transcript tool. It now defaults to **bulk channel collection** for studying beliefs, values, frameworks, and storytelling.
+You do not need a YouTube API key. You do not need to know how to code.
 
-## What you get
+---
 
-For each channel, files land in `data/<channel-slug>/`:
+## Start the app (Mac)
 
-```
-data/SomeCreator/
-  manifest.json          # scrape stats
-  index.csv              # one row per video (dates, views, duration, transcript size)
-  skipped.jsonl          # videos with no captions / errors
-  videos/
-    abc123.json          # full record (transcript + metadata)
-    abc123.md            # LLM-friendly markdown
-```
+1. Download or clone this folder onto your computer.
+2. Open the folder in Finder.
+3. Double-click **`Open UI.command`**.
+4. A Terminal window will open. Leave it open.
+5. Your browser should open to [http://localhost:3000](http://localhost:3000).
 
-Each video record includes, when YouTube provides them:
+If nothing happens the first time:
 
-- Timed transcript (priority) and a plain-text copy
-- Title, URL, duration, upload date
-- Description (full, not truncated)
-- View / like / comment counts
-- Tags, chapters, channel name
+- Right-click **`Open UI.command`** → **Open** → **Open**.
+- Macs sometimes ask permission before they will run a new file.
 
-## Setup
+**To stop:** click the Terminal window and press **Control + C**.
+
+---
+
+## What to do in the browser
+
+- **Single Video** — paste a YouTube video link, then click **Get Transcript**.
+- **Channel Scraper** — paste a channel link (like `https://www.youtube.com/@ChannelName`) to pull captions from many videos.
+
+What you get is the video’s **caption track** (manual or auto-generated). If a video has no captions, it is skipped.
+
+---
+
+## Where the files go
+
+For bigger channel jobs, saved files live in a `data` folder inside this project. Each video can have:
+
+- the transcript (the captions, with times)
+- extra info like title, date, and description
+
+You can open those files later, or drop them into a tool like NotebookLM.
+
+---
+
+## Extra (optional, terminal)
+
+If you prefer typing commands, from this folder:
 
 ```bash
-cd ~/YouTube-Transcript-Scraper
-python3.11 -m venv .venv
+./start.sh
+```
+
+That does the same thing as double-clicking **Open UI.command**.
+
+To pull a whole channel from the terminal (resumes if you stop and run it again):
+
+```bash
 source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Python 3.11 recommended (3.10+ should work).
-
-## Bulk scrape (the main path)
-
-```bash
 python scrape_channel.py "https://www.youtube.com/@ChannelName"
 ```
 
-That writes `data/<slug>/` and **resumes by default**. If it stops or YouTube rate-limits you, run the same command again; videos that already have a transcript are skipped.
-
-Useful flags:
-
-| Flag | Meaning |
-| --- | --- |
-| `-n 50` | Cap at 50 videos |
-| `--delay 2` | Wait 2s between videos (safer on large channels) |
-| `--min-duration 61` | Skip Shorts / clips under 61 seconds |
-| `--no-metadata` | Transcripts only (faster) |
-| `-o data/my-channel` | Custom output folder |
-
-Then analyze:
-
-1. Open `index.csv` to see coverage.
-2. Drop `videos/*.md` into NotebookLM, or point Cursor/Claude at the folder with `prompts/analyze-channel.md`.
-
-## Catalog first (no transcripts)
-
-If you only need titles and URLs:
-
-```bash
-python scrape_channel.py "https://www.youtube.com/@ChannelName" --metadata-only --fast-playlist
-```
-
-For duration, views, and comments (slower, one request per video):
-
-```bash
-python scrape_channel.py "https://www.youtube.com/@ChannelName" --metadata-only
-```
-
-## Web UI (single video + light channel jobs)
-
-```bash
-python app.py
-```
-
-Open [http://localhost:3000](http://localhost:3000). The browser is fine for a handful of videos. For a favorite channel with hundreds of videos, use the CLI so results live on disk instead of in the page.
+---
 
 ## Notes
 
-- No YouTube API key. Uses `yt-dlp` for listings/metadata and `youtube-transcript-api` for captions.
-- Captions must exist (manual or auto-generated). Videos without captions are skipped and logged.
-- Be polite with `--delay`. YouTube will rate-limit aggressive scraping.
-- Re-run is cheap: resume is on unless you pass `--no-resume`.
+- You need Python 3.10 or newer on your Mac. The one-click file will try to set the rest up for you.
+- This runs only on your computer (`localhost`). It is not a website on the internet.
+- YouTube may slow you down if you pull too many videos too fast. That is normal. You can stop and start again later.
