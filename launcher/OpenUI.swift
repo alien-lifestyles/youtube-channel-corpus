@@ -1,14 +1,21 @@
 import Cocoa
 import Darwin
+import Security
+
+@_silgen_name("SecTranslocateCreateOriginalPathForURL")
+func SecTranslocateCreateOriginalPathForURL(
+    _ translocatedURL: CFURL,
+    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
+) -> Unmanaged<CFURL>?
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var server: Process?
     var pollTimer: Timer?
 
-    let repo = Bundle.main.bundleURL.deletingLastPathComponent()
     let port = 3000
     var url: URL { URL(string: "http://127.0.0.1:\(port)")! }
+    lazy var repo: URL = Self.findProjectRoot()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildWindow()
@@ -66,11 +73,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("%@", message)
     }
 
+    private static func originalBundleURL() -> URL {
+        let launched = Bundle.main.bundleURL
+        var error: Unmanaged<CFError>?
+        if let original = SecTranslocateCreateOriginalPathForURL(launched as CFURL, &error) {
+            return original.takeRetainedValue() as URL
+        }
+        return launched
+    }
+
+    private static func findProjectRoot() -> URL {
+        let fm = FileManager.default
+        var dirs: [URL] = [
+            originalBundleURL().deletingLastPathComponent(),
+            Bundle.main.bundleURL.deletingLastPathComponent(),
+            fm.homeDirectoryForCurrentUser.appendingPathComponent("YouTube-Transcript-Scraper"),
+        ]
+        dirs.append(URL(fileURLWithPath: fm.currentDirectoryPath))
+        for dir in dirs {
+            let script = dir.appendingPathComponent("start.sh")
+            let app = dir.appendingPathComponent("app.py")
+            if fm.fileExists(atPath: script.path), fm.fileExists(atPath: app.path) {
+                return dir
+            }
+        }
+        return originalBundleURL().deletingLastPathComponent()
+    }
+
     private func startServer() {
         let script = repo.appendingPathComponent("start.sh")
-        guard FileManager.default.isExecutableFile(atPath: script.path) else {
-            log("start.sh missing or not executable at \(script.path)")
-            showAlert("Could not find start.sh next to Open UI.app. Keep both in the same folder.")
+        log("Looking for project in \(repo.path)")
+        guard FileManager.default.fileExists(atPath: script.path) else {
+            log("start.sh not found at \(script.path) (launched from \(Bundle.main.bundlePath))")
+            showAlert("Could not find start.sh. Put Open UI.app in the YouTube-Transcript-Scraper folder (next to start.sh) and open it from there.")
             NSApp.terminate(nil)
             return
         }
