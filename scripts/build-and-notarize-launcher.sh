@@ -10,7 +10,7 @@ CONFIG="${CODESIGNING_CONFIG:-$HOME/Archive/2026-08-cursor-workspaces/Alien Life
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$ROOT/launcher/Info.plist" "$APP/Contents/Info.plist"
-swiftc -O -o "$APP/Contents/MacOS/Open UI" "$ROOT/launcher/OpenUI.swift"
+swiftc -O -framework AppKit -o "$APP/Contents/MacOS/Open UI" "$ROOT/launcher/OpenUI.swift"
 
 codesign --force --options runtime --timestamp \
   --entitlements "$ROOT/launcher/OpenUI.entitlements" \

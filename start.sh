@@ -25,6 +25,9 @@ port_open() {
 }
 
 open_browser() {
+  if [[ "${YT_SCRAPER_SKIP_BROWSER:-0}" == "1" ]]; then
+    return 0
+  fi
   if command -v open >/dev/null 2>&1; then
     open "$URL"
   elif command -v xdg-open >/dev/null 2>&1; then
