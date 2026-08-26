@@ -10,14 +10,18 @@ You do not need a YouTube API key. You do not need to know how to code.
 
 1. Download or clone this folder onto your computer.
 2. Open the folder in Finder.
-3. Double-click **`Open UI.command`**.
+3. Double-click **`Open UI`**.
 4. A Terminal window will open. Leave it open.
 5. Your browser should open to [http://localhost:3000](http://localhost:3000).
 
-If nothing happens the first time:
+That app is signed and notarized with Apple. The first time, macOS may still ask if you want to open it — choose **Open**.
 
-- Right-click **`Open UI.command`** → **Open** → **Open**.
-- Macs sometimes ask permission before they will run a new file.
+If you prefer Terminal:
+
+```bash
+cd ~/YouTube-Transcript-Scraper
+./start.sh
+```
 
 **To stop:** click the Terminal window and press **Control + C**.
 
