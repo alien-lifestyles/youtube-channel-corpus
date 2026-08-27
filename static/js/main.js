@@ -21,12 +21,16 @@ document.addEventListener('DOMContentLoaded', function() {
             hideError();
             hideTranscript();
             hideChannelResult();
+            if (typeof hideScrapeConfirm === 'function') hideScrapeConfirm();
         });
     });
 
     // Channel form
     const channelForm = document.getElementById('channel-form');
     const channelUrlInput = document.getElementById('channel-url');
+    const getChannelInfoBtn = document.getElementById('get-channel-info-btn');
+    const channelInfoPanel = document.getElementById('channel-info-panel');
+    let lastChannelSlug = '';
     const scrapeChannelBtn = document.getElementById('scrape-channel-btn');
     const channelBtnText = scrapeChannelBtn.querySelector('.btn-text');
     const channelBtnLoader = scrapeChannelBtn.querySelector('.btn-loader');
@@ -38,16 +42,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const copyChannelBtn = document.getElementById('copy-channel-btn');
     const copyChannelText = copyChannelBtn.querySelector('.copy-channel-text');
 
-    const metadataOnlyCheckbox = document.getElementById('metadata-only');
-    const fullExtractionCheckbox = document.getElementById('full-extraction');
-    const fastPlaylistLabel = document.getElementById('fast-playlist-label');
-    const fastPlaylistCheckbox = document.getElementById('fast-playlist');
-    const fastPlaylistHint = document.getElementById('fast-playlist-hint');
-    const fullExtractionLabel = document.getElementById('full-extraction-label');
-    const fullExtractionHint = document.getElementById('full-extraction-hint');
     const delayLabel = document.getElementById('delay-label');
     const batchSizeLabel = document.getElementById('batch-size-label');
     const batchSizeSelect = document.getElementById('batch-size');
+    const listStyleFieldset = document.getElementById('list-style-fieldset');
+    const scrapeSummary = document.getElementById('scrape-summary');
+    const scrapeConfirm = document.getElementById('scrape-confirm');
+    const scrapeConfirmText = document.getElementById('scrape-confirm-text');
+    const scrapeConfirmStart = document.getElementById('scrape-confirm-start');
+    const scrapeConfirmCancel = document.getElementById('scrape-confirm-cancel');
     const loadNextBtn = document.getElementById('load-next-btn');
     const loadNextText = loadNextBtn.querySelector('.load-next-text');
     const copyUrlsBtn = document.getElementById('copy-urls-btn');
@@ -62,37 +65,98 @@ document.addEventListener('DOMContentLoaded', function() {
     let lastOffset = 0;
     let lastBatchSize = 100;
 
-    function syncMetadataOptionUi() {
-        const meta = metadataOnlyCheckbox.checked;
-        const fast = fastPlaylistCheckbox.checked;
-        const full = fullExtractionCheckbox.checked;
-        fastPlaylistLabel.style.display = meta ? 'flex' : 'none';
-        fastPlaylistHint.style.display = meta && fast ? 'block' : 'none';
-        fullExtractionLabel.style.display = meta ? 'flex' : 'none';
-        fullExtractionHint.style.display = meta && full ? 'block' : 'none';
-        delayLabel.style.display = meta && !fast ? 'flex' : (meta ? 'none' : 'flex');
-        batchSizeLabel.style.display = meta ? 'none' : 'flex';
+    function getScrapeOptions() {
+        const goal = document.querySelector('input[name="scrape-goal"]:checked')?.value || 'captions';
+        const listStyle = document.querySelector('input[name="list-style"]:checked')?.value || 'quick';
+        const metadataOnly = goal === 'list';
+        const fullExtraction = metadataOnly && listStyle === 'full';
+        const fastPlaylistOnly = metadataOnly && listStyle === 'quick';
+        const maxVideos = parseInt(document.getElementById('max-videos').value, 10) || 200;
+        const delay = parseFloat(document.getElementById('channel-delay').value) || 1.5;
+        const batchSize = metadataOnly ? 50 : (parseInt(batchSizeSelect.value, 10) || 50);
+        const year = document.querySelector('.year-btn.active')?.dataset.year || '';
+        const dateAfter = year ? `${year}-01-01` : '';
+        const dateBefore = year ? `${year}-12-31` : '';
+        const skipShorts = document.getElementById('skip-shorts')?.checked;
+        const minDuration = skipShorts ? 61 : null;
+        return {
+            goal,
+            listStyle,
+            metadataOnly,
+            fullExtraction,
+            fastPlaylistOnly,
+            maxVideos,
+            delay,
+            batchSize,
+            dateAfter,
+            dateBefore,
+            minDuration,
+        };
     }
 
-    metadataOnlyCheckbox.addEventListener('change', function() {
-        const checked = this.checked;
-        if (!checked) {
-            fullExtractionCheckbox.checked = false;
-            fastPlaylistCheckbox.checked = false;
+    function describeScrape(opts) {
+        const n = opts.maxVideos;
+        let dateBit = '';
+        if (opts.dateAfter && opts.dateBefore) {
+            dateBit = ` Only videos from ${opts.dateAfter.slice(0, 4)}.`;
         }
-        syncMetadataOptionUi();
+        const shortsBit = opts.minDuration ? ' Shorts under 1 minute are skipped.' : '';
+        if (!opts.metadataOnly) {
+            const mins = Math.max(1, Math.round((Math.min(n, opts.batchSize) * opts.delay) / 60));
+            return `Up to ${n} videos, newest first. You’ll get captions (YouTube’s caption track, same as Show transcript). Videos with no captions are skipped.${shortsBit}${dateBit} About ${opts.delay} seconds between videos. This page: ${opts.batchSize} (YouTube lists 50 at a time); you can load more after. Roughly ${mins} minute(s) for this batch.`;
+        }
+        if (opts.fastPlaylistOnly) {
+            return `Up to ${n} videos. Titles and links only. No captions. Fast. Length and views may be blank.${shortsBit}${dateBit}`;
+        }
+        return `Up to ${n} videos. Titles, links, and extra details (date, likes, description) when YouTube provides them. No captions. Slower — about ${opts.delay} seconds per video.${shortsBit}${dateBit}`;
+    }
+
+    function syncScrapeOptionUi() {
+        const opts = getScrapeOptions();
+        listStyleFieldset.hidden = !opts.metadataOnly;
+        batchSizeLabel.style.display = opts.metadataOnly ? 'none' : 'flex';
+        delayLabel.style.display = opts.fastPlaylistOnly ? 'none' : 'flex';
+        scrapeSummary.textContent = describeScrape(opts);
+        scrapeConfirmText.textContent = describeScrape(opts) + ' Start this scrape?';
+    }
+
+    function hideScrapeConfirm() {
+        scrapeConfirm.hidden = true;
+    }
+
+    document.querySelectorAll('input[name="scrape-goal"], input[name="list-style"]').forEach((el) => {
+        el.addEventListener('change', syncScrapeOptionUi);
     });
-    fastPlaylistCheckbox.addEventListener('change', function() {
-        if (this.checked) fullExtractionCheckbox.checked = false;
-        syncMetadataOptionUi();
-    });
-    fullExtractionCheckbox.addEventListener('change', function() {
-        if (this.checked) fastPlaylistCheckbox.checked = false;
-        syncMetadataOptionUi();
-    });
-    syncMetadataOptionUi();
+    function renderYearButtons(startYear, endYear) {
+        const wrap = document.getElementById('year-buttons');
+        const selected = document.querySelector('.year-btn.active')?.dataset.year || '';
+        const years = [];
+        for (let y = endYear; y >= startYear; y--) years.push(String(y));
+        wrap.innerHTML = `<button type="button" class="year-btn ${selected ? '' : 'active'}" data-year="">All years</button>` +
+            years.map((y) => `<button type="button" class="year-btn ${selected === y ? 'active' : ''}" data-year="${y}">${y}</button>`).join('');
+        wrap.querySelectorAll('.year-btn').forEach((btn) => {
+            btn.addEventListener('click', function() {
+                wrap.querySelectorAll('.year-btn').forEach((b) => b.classList.remove('active'));
+                this.classList.add('active');
+                syncScrapeOptionUi();
+            });
+        });
+        if (selected && !years.includes(selected)) {
+            wrap.querySelector('[data-year=""]')?.classList.add('active');
+        }
+    }
+
+    const thisYear = new Date().getFullYear();
+    renderYearButtons(thisYear - 12, thisYear);
+
+    document.getElementById('max-videos').addEventListener('input', syncScrapeOptionUi);
+    document.getElementById('channel-delay').addEventListener('input', syncScrapeOptionUi);
+    document.getElementById('skip-shorts').addEventListener('change', syncScrapeOptionUi);
+    batchSizeSelect.addEventListener('change', syncScrapeOptionUi);
+    syncScrapeOptionUi();
 
     async function runChannelScrape(url, maxVideos, delay, metadataOnly, fullExtraction, fastPlaylistOnly, offset, limit) {
+        const extra = getScrapeOptions();
         const startRes = await fetch('/scrape-channel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -104,7 +168,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 full_extraction: fullExtraction,
                 fast_playlist_only: fastPlaylistOnly,
                 offset: offset,
-                limit: limit
+                limit: limit,
+                min_duration: extra.minDuration,
+                date_after: extra.dateAfter || null,
+                date_before: extra.dateBefore || null,
             })
         });
         const startData = await startRes.json();
@@ -114,42 +181,39 @@ document.addEventListener('DOMContentLoaded', function() {
         return startData.job_id;
     }
 
-    channelForm.addEventListener('submit', async function(e) {
-        e.preventDefault();
+    function progressLabel(opts) {
+        if (!opts.metadataOnly) return 'captions';
+        if (opts.fastPlaylistOnly) return 'video list';
+        return 'video details';
+    }
+
+    async function startChannelScrape() {
         const url = channelUrlInput.value.trim();
-        const maxVideos = parseInt(document.getElementById('max-videos').value, 10) || 200;
-        const delay = parseFloat(document.getElementById('channel-delay').value) || 1.5;
-        const metadataOnly = metadataOnlyCheckbox.checked;
-        const fullExtraction = metadataOnly && fullExtractionCheckbox.checked;
-        const fastPlaylistOnly = metadataOnly && fastPlaylistCheckbox.checked && !fullExtraction;
-        const batchSize = metadataOnly ? 100 : (parseInt(batchSizeSelect.value, 10) || 100);
+        const opts = getScrapeOptions();
+        const { maxVideos, delay, metadataOnly, fullExtraction, fastPlaylistOnly, batchSize } = opts;
 
-        if (!url) {
-            showError('Please enter a channel URL');
-            return;
-        }
-
+        hideScrapeConfirm();
         hideError();
         hideTranscript();
         hideChannelResult();
         loadNextBtn.style.display = 'none';
         setChannelLoadingState(true);
         channelProgress.style.display = 'block';
-        channelProgressText.textContent = metadataOnly
-            ? (fastPlaylistOnly ? 'Loading channel playlist (fast)...' : 'Fetching metadata...')
-            : 'Starting...';
+        channelProgressText.textContent = opts.metadataOnly
+            ? (opts.fastPlaylistOnly ? 'Loading channel list…' : 'Fetching video details…')
+            : 'Starting captions…';
         channelProgressFill.style.width = '0%';
 
         try {
             const jobId = await runChannelScrape(url, maxVideos, delay, metadataOnly, fullExtraction, fastPlaylistOnly, 0, batchSize);
+            const label = progressLabel(opts);
             const pollInterval = setInterval(async () => {
                 const statusRes = await fetch('/scrape-channel/status/' + jobId);
                 const status = await statusRes.json();
                 if (status.status === 'running') {
-                    const mode = fullExtraction ? 'full metadata' : (fastPlaylistOnly ? 'playlist' : (metadataOnly ? 'metadata' : 'transcript'));
                     channelProgressText.textContent = status.total
-                        ? `Fetching ${mode} ${status.current} of ${status.total}: ${(status.video_title || '').substring(0, 40)}...`
-                        : `Fetching ${fullExtraction ? 'full metadata' : (fastPlaylistOnly ? 'playlist' : (metadataOnly ? 'metadata' : 'transcripts'))}...`;
+                        ? `Fetching ${label} ${status.current} of ${status.total}: ${(status.video_title || '').substring(0, 40)}…`
+                        : `Fetching ${label}…`;
                     channelProgressFill.style.width = status.total ? (status.current / status.total * 100) + '%' : '30%';
                 } else if (status.status === 'done') {
                     clearInterval(pollInterval);
@@ -169,14 +233,30 @@ document.addEventListener('DOMContentLoaded', function() {
             showError(error.message || 'Network error');
             console.error(error);
         }
+    }
+
+    channelForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const url = channelUrlInput.value.trim();
+        if (!url) {
+            showError('Please enter a channel URL');
+            return;
+        }
+        hideError();
+        syncScrapeOptionUi();
+        scrapeConfirm.hidden = false;
+        scrapeConfirm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
+
+    scrapeConfirmStart.addEventListener('click', startChannelScrape);
+    scrapeConfirmCancel.addEventListener('click', hideScrapeConfirm);
 
     loadNextBtn.addEventListener('click', async function() {
         if (!lastChannelUrl) return;
         loadNextBtn.disabled = true;
         const nextOffset = accumulatedVideos.length + accumulatedSkipped.length;
         const maxVideos = parseInt(document.getElementById('max-videos').value, 10) || 200;
-        const delay = parseFloat(document.getElementById('channel-delay').value) || 1.5;
+        const delay = getScrapeOptions().delay;
         const metadataOnly = false;
         const fullExtraction = false;
 
@@ -193,8 +273,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const status = await statusRes.json();
                 if (status.status === 'running') {
                     channelProgressText.textContent = status.total
-                        ? `Fetching transcript ${status.current} of ${status.total}: ${(status.video_title || '').substring(0, 40)}...`
-                        : 'Fetching transcripts...';
+                        ? `Fetching captions ${status.current} of ${status.total}: ${(status.video_title || '').substring(0, 40)}...`
+                        : 'Fetching captions...';
                     channelProgressFill.style.width = status.total ? (status.current / status.total * 100) + '%' : '30%';
                 } else if (status.status === 'done') {
                     clearInterval(pollInterval);
@@ -284,7 +364,7 @@ document.addEventListener('DOMContentLoaded', function() {
             accumulatedVideos = [];
             accumulatedSkipped = [];
             loadNextBtn.style.display = 'none';
-            channelResultTitle.textContent = 'Channel Video List (NotebookLM URLs)';
+            channelResultTitle.textContent = 'Channel results (video list)';
             channelResultText.textContent = result.table || '';
             channelResultText.classList.add('table-content');
             copyChannelBtn.querySelector('.copy-channel-text').textContent = 'Copy Table';
@@ -309,7 +389,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 markdown: result.markdown
             };
 
-            channelResultTitle.textContent = 'Channel Curriculum';
+            channelResultTitle.textContent = 'Channel results';
             const displayMd = accumulatedVideos.length > 0 ? result.markdown : '';
             if (offset > 0) {
                 const prevMd = channelResultText.textContent || '';
@@ -333,13 +413,74 @@ document.addEventListener('DOMContentLoaded', function() {
         channelResultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
+    function isoToMmddyyyy(iso) {
+        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+        return iso.slice(5, 7) + iso.slice(8, 10) + iso.slice(0, 4);
+    }
+
+    function downloadFilename(ext) {
+        const fromUrl = (channelUrlInput.value.match(/@([^/?]+)/) || [])[1];
+        const slug = lastChannelSlug || (fromUrl ? fromUrl.replace(/[^A-Za-z0-9]+/g, '') : '') || 'channel';
+        const year = document.querySelector('.year-btn.active')?.dataset.year || '';
+        const range = year ? `0101${year}_1231${year}` : 'all';
+        return `${slug}_${range}.${ext}`;
+    }
+
+    getChannelInfoBtn.addEventListener('click', async function() {
+        const url = channelUrlInput.value.trim();
+        if (!url) {
+            showError('Please enter a channel URL');
+            return;
+        }
+        hideError();
+        getChannelInfoBtn.disabled = true;
+        getChannelInfoBtn.textContent = 'Looking up…';
+        channelInfoPanel.hidden = false;
+        channelInfoPanel.innerHTML = '<p>Fetching channel info (this can take ~10–20 seconds)…</p>';
+        try {
+            const res = await fetch('/channel-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel_url: url }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Could not fetch channel info');
+            lastChannelSlug = data.slug || '';
+            const oldestY = parseInt((data.oldest_date || '').slice(0, 4), 10);
+            const newestY = parseInt((data.newest_date || '').slice(0, 4), 10);
+            if (oldestY && newestY) {
+                renderYearButtons(oldestY, newestY);
+            }
+            const tags = (data.tags || []).join(', ') || '—';
+            const subs = data.subscriber_count != null
+                ? Number(data.subscriber_count).toLocaleString()
+                : '—';
+            channelInfoPanel.innerHTML = `
+                <h3>${data.channel || 'Channel'}</h3>
+                <dl>
+                    <dt>Videos</dt><dd>${data.video_count ?? '—'}</dd>
+                    <dt>Subscribers</dt><dd>${subs}</dd>
+                    <dt>First published</dt><dd>${data.oldest_date || '—'} ${data.oldest_title ? ' — ' + data.oldest_title : ''}</dd>
+                    <dt>Latest video</dt><dd>${data.newest_date || '—'} ${data.newest_title ? ' — ' + data.newest_title : ''}</dd>
+                    <dt>Tags / topics</dt><dd>${tags}</dd>
+                </dl>
+            `;
+        } catch (err) {
+            channelInfoPanel.hidden = true;
+            showError(err.message || 'Could not fetch channel info');
+        } finally {
+            getChannelInfoBtn.disabled = false;
+            getChannelInfoBtn.textContent = 'Get channel info';
+        }
+    });
+
     downloadCsvBtn.addEventListener('click', function() {
         if (!lastChannelResult || !lastChannelResult.csv) return;
         const blob = new Blob([lastChannelResult.csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'channel_videos.csv';
+        a.download = downloadFilename('csv');
         a.click();
         URL.revokeObjectURL(url);
     });

@@ -67,6 +67,18 @@ def main() -> int:
         help="Skip videos shorter than this many seconds (e.g. 61 to skip most Shorts)",
     )
     parser.add_argument(
+        "--date-after",
+        type=str,
+        default=None,
+        help="Only include videos on or after this date (YYYY-MM-DD or YYYYMMDD)",
+    )
+    parser.add_argument(
+        "--date-before",
+        type=str,
+        default=None,
+        help="Only include videos on or before this date (YYYY-MM-DD or YYYYMMDD)",
+    )
+    parser.add_argument(
         "--no-metadata",
         action="store_true",
         help="Transcripts only; skip per-video yt-dlp metadata (faster, less useful for analysis)",
@@ -121,7 +133,13 @@ def main() -> int:
 
     channel_url = _normalize_channel_url(args.channel_url)
     try:
-        videos = _get_channel_videos(channel_url, args.max_videos)
+        videos = _get_channel_videos(
+            channel_url,
+            args.max_videos,
+            date_after=args.date_after,
+            date_before=args.date_before,
+            min_duration=args.min_duration,
+        )
         total = len(videos)
     except Exception as e:
         print(f"Error fetching channel: {e}", file=sys.stderr)
@@ -146,6 +164,8 @@ def main() -> int:
             output_dir=output_dir if args.format == "corpus" else None,
             resume=not args.no_resume,
             min_duration=args.min_duration,
+            date_after=args.date_after,
+            date_before=args.date_before,
         )
     except Exception as e:
         print(f"Error during scrape: {e}", file=sys.stderr)
@@ -223,6 +243,9 @@ def _run_metadata_only(args: argparse.Namespace) -> int:
                 full_extraction=False,
                 delay_seconds=0,
                 fast_playlist_only=True,
+                date_after=args.date_after,
+            date_before=args.date_before,
+                min_duration=args.min_duration,
             )
         except Exception as e:
             print(f"Error fetching channel: {e}", file=sys.stderr)
@@ -232,7 +255,13 @@ def _run_metadata_only(args: argparse.Namespace) -> int:
                 pbar_holder["pbar"].close()
     else:
         try:
-            preview = _get_channel_videos(channel_url, args.max_videos)
+            preview = _get_channel_videos(
+                channel_url,
+                args.max_videos,
+                date_after=args.date_after,
+            date_before=args.date_before,
+                min_duration=args.min_duration,
+            )
             total = len(preview)
         except Exception as e:
             print(f"Error fetching channel: {e}", file=sys.stderr)
@@ -264,6 +293,9 @@ def _run_metadata_only(args: argparse.Namespace) -> int:
                 full_extraction=args.full_extraction,
                 delay_seconds=max(0.0, args.delay),
                 base_videos=preview,
+                date_after=args.date_after,
+            date_before=args.date_before,
+                min_duration=args.min_duration,
             )
         except Exception as e:
             print(f"Error fetching channel: {e}", file=sys.stderr)

@@ -153,6 +153,47 @@ main {
     align-items: center;
 }
 
+.year-picker {
+    flex: 1 1 100%;
+    margin-top: 4px;
+}
+
+.year-picker-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.year-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.year-btn {
+    padding: 8px 14px;
+    border: 2px solid #d9def5;
+    background: white;
+    border-radius: 999px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #333;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.year-btn:hover {
+    border-color: #667eea;
+    color: #667eea;
+}
+
+.year-btn.active {
+    background: #667eea;
+    border-color: #667eea;
+    color: white;
+}
+
 .checkbox-label {
     display: flex;
     align-items: center;
@@ -172,6 +213,222 @@ main {
     font-size: 0.85rem;
     color: #666;
     font-style: italic;
+}
+
+.field-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.85rem;
+    color: #666;
+    font-style: normal;
+    font-weight: 400;
+}
+
+.goal-fieldset {
+    border: 2px solid #e8e8ee;
+    border-radius: 10px;
+    padding: 14px 16px 8px;
+    margin: 0 0 16px;
+}
+
+.goal-fieldset legend {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #667eea;
+    padding: 0 6px;
+}
+
+.goal-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    color: #333;
+}
+
+.goal-option input {
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+
+.goal-option strong {
+    display: block;
+}
+
+.goal-desc {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.88rem;
+    color: #666;
+    font-weight: 400;
+}
+
+.number-label,
+.channel-options .number-label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 140px;
+}
+
+.number-label input,
+.number-label select {
+    width: 90px;
+    padding: 8px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+.scrape-summary {
+    margin: 8px 0 16px;
+    padding: 14px 16px;
+    background: #f4f6ff;
+    border-radius: 8px;
+    border: 1px solid #d9def5;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #333;
+}
+
+.channel-start-row {
+    margin-bottom: 8px;
+}
+
+#channel-url {
+    flex: 1;
+    padding: 16px 20px;
+    font-size: 1rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-family: inherit;
+}
+
+#channel-url:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+#get-channel-info-btn {
+    padding: 16px 20px;
+    background: white;
+    color: #667eea;
+    border: 2px solid #667eea;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+#get-channel-info-btn:hover:not(:disabled) {
+    background: #667eea;
+    color: white;
+}
+
+#get-channel-info-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.channel-info-panel {
+    margin: 0 0 16px;
+    padding: 14px 16px;
+    background: #f4f6ff;
+    border: 1px solid #d9def5;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.channel-info-panel h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+}
+
+.channel-info-panel dl {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 6px 12px;
+    margin: 0;
+}
+
+.channel-info-panel dt {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.channel-info-panel dd {
+    margin: 0;
+}
+
+#scrape-channel-btn {
+    padding: 16px 32px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+#scrape-channel-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+#scrape-channel-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.scrape-confirm {
+    margin: 12px 0 20px;
+    padding: 16px;
+    background: #fff8e8;
+    border: 2px solid #e8d48b;
+    border-radius: 10px;
+}
+
+.scrape-confirm p {
+    margin-bottom: 12px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.scrape-confirm-actions {
+    display: flex;
+    gap: 10px;
+}
+
+#scrape-confirm-start {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: transparent;
+}
+
+#scrape-confirm-start:hover {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.confirm-cancel {
+    background: white;
+    color: #555;
+    border-color: #ccc;
+}
+
+.confirm-cancel:hover {
+    background: #f3f3f3;
+    color: #333;
 }
 
 .input-group {

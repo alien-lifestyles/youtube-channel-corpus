@@ -64,6 +64,12 @@ source .venv/bin/activate
 python scrape_channel.py "https://www.youtube.com/@ChannelName"
 ```
 
+Optional filters (smaller batches without a Google API key):
+
+```bash
+python scrape_channel.py "https://www.youtube.com/@ChannelName" -n 50 --min-duration 61 --date-after 2024-01-01 --date-before 2024-12-31
+```
+
 ---
 
 ## Notes

@@ -3,6 +3,7 @@ import re
 import threading
 import time
 import uuid
+from typing import Optional
 
 from flask import Flask, render_template, request, jsonify
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -15,11 +16,14 @@ from channel_scraper import (
     export_to_markdown,
     export_to_markdown_from_dicts,
     export_urls_only,
+    get_channel_overview,
     get_channel_metadata,
     scrape_channel,
 )
 
 app = Flask(__name__)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 # In-memory job store for channel scrape progress (job_id -> {status, current, total, video_title, result, error})
 _scrape_jobs: dict = {}
@@ -134,20 +138,32 @@ def get_transcript():
         }), 500
 
 
-def _get_cached_or_fetch_videos(channel_url: str, max_videos: int) -> list:
+def _get_cached_or_fetch_videos(
+    channel_url: str,
+    max_videos: int,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    min_duration: Optional[float] = None,
+) -> list:
     """Get channel video list from cache or fetch. Updates cache on fetch."""
     norm_url = _normalize_channel_url(channel_url)
+    cache_key = (norm_url, max_videos, date_after or "", date_before or "", min_duration or 0)
     now = time.time()
 
     with _channel_cache_lock:
-        entry = _channel_video_cache.get(norm_url)
+        entry = _channel_video_cache.get(cache_key)
         if entry:
             videos, ts = entry
-            if now - ts < _CHANNEL_CACHE_TTL_SEC:
+            if now - ts < _CHANNEL_CACHE_TTL_SEC and len(videos) >= max_videos:
                 return videos
-        # Cache miss or expired: fetch and store
-        videos = _get_channel_videos(channel_url, max_videos)
-        _channel_video_cache[norm_url] = (videos, now)
+        videos = _get_channel_videos(
+            channel_url,
+            max_videos,
+            date_after=date_after,
+            date_before=date_before,
+            min_duration=min_duration,
+        )
+        _channel_video_cache[cache_key] = (videos, now)
         return videos
 
 
@@ -161,6 +177,9 @@ def _run_channel_scrape(
     fast_playlist_only: bool = False,
     offset: int = 0,
     limit: int = 100,
+    min_duration: Optional[float] = None,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
 ) -> None:
     """Background task to scrape channel or fetch metadata only."""
     try:
@@ -181,6 +200,9 @@ def _run_channel_scrape(
                 full_extraction=full_extraction,
                 delay_seconds=delay,
                 fast_playlist_only=fast_playlist_only and not full_extraction,
+                date_after=date_after,
+                date_before=date_before,
+                min_duration=min_duration,
             )
             result = {
                 "metadata_only": True,
@@ -193,7 +215,17 @@ def _run_channel_scrape(
                 "has_more": False,
             }
         else:
-            videos = _get_cached_or_fetch_videos(channel_url, max_videos)
+            needed = offset + limit
+            fetch_n = needed + 1
+            if max_videos:
+                fetch_n = min(max_videos, needed + 1)
+            videos = _get_cached_or_fetch_videos(
+                channel_url,
+                fetch_n,
+                date_after=date_after,
+                date_before=date_before,
+                min_duration=min_duration,
+            )
             total_count = len(videos)
             scraped, skipped, _ = scrape_channel(
                 channel_url=channel_url,
@@ -203,8 +235,12 @@ def _run_channel_scrape(
                 videos=videos,
                 offset=offset,
                 limit=limit,
+                min_duration=min_duration,
+                date_after=date_after,
+                date_before=date_before,
             )
-            batch_count = len(scraped) + len(skipped)
+            more_listed = len(videos) > needed
+            under_cap = max_videos is None or needed < max_videos
             result = {
                 "metadata_only": False,
                 "videos": [v.to_dict() for v in scraped],
@@ -213,7 +249,7 @@ def _run_channel_scrape(
                 "total": total_count,
                 "offset": offset,
                 "limit": limit,
-                "has_more": offset + batch_count < total_count,
+                "has_more": more_listed and under_cap,
             }
 
         with _scrape_jobs_lock:
@@ -229,6 +265,20 @@ def _run_channel_scrape(
                 _scrape_jobs[job_id].update(status="error", error=str(e))
 
 
+@app.route("/channel-info", methods=["POST"])
+def channel_info_route():
+    """Return channel snapshot before a scrape (count, dates, tags)."""
+    try:
+        data = request.get_json() or {}
+        channel_url = (data.get("channel_url") or data.get("url") or "").strip()
+        if not channel_url:
+            return jsonify({"error": "Please provide a channel URL"}), 400
+        overview = get_channel_overview(channel_url)
+        return jsonify(overview)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/scrape-channel', methods=['POST'])
 def scrape_channel_route():
     """Start a channel scrape job. Returns job_id for polling."""
@@ -241,7 +291,14 @@ def scrape_channel_route():
         full_extraction = bool(data.get("full_extraction", False))
         fast_playlist_only = bool(data.get("fast_playlist_only", False))
         offset = int(data.get("offset", 0))
-        limit = int(data.get("limit", 100))
+        limit = int(data.get("limit", 50))
+        min_duration = data.get("min_duration")
+        date_after = (data.get("date_after") or "").strip() or None
+        date_before = (data.get("date_before") or "").strip() or None
+        if min_duration is not None and min_duration != "":
+            min_duration = float(min_duration)
+        else:
+            min_duration = None
 
         if not channel_url:
             return jsonify({"error": "Please provide a channel URL"}), 400
@@ -251,8 +308,8 @@ def scrape_channel_route():
             if max_videos < 1 or max_videos > 2000:
                 return jsonify({"error": "max_videos must be between 1 and 2000"}), 400
 
-        if limit < 1 or limit > 100:
-            return jsonify({"error": "limit must be between 1 and 100"}), 400
+        if limit < 1 or limit > 200:
+            return jsonify({"error": "limit must be between 1 and 200"}), 400
 
         if offset < 0:
             return jsonify({"error": "offset must be >= 0"}), 400
@@ -280,6 +337,9 @@ def scrape_channel_route():
                 fast_playlist_only,
                 offset,
                 limit,
+                min_duration,
+                date_after,
+                date_before,
             ),
         )
         thread.daemon = True

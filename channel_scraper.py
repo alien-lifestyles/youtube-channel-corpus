@@ -4,6 +4,7 @@ Channel scraper: channel video lists, transcripts with timestamps, and analysis 
 
 from __future__ import annotations
 
+import re
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -269,6 +270,88 @@ def _normalize_channel_url(url: str, videos_tab_only: bool = False) -> str:
     return url
 
 
+def _compact_ymd(value: Optional[str]) -> Optional[str]:
+    """Normalize YYYY-MM-DD or YYYYMMDD to YYYYMMDD."""
+    if not value:
+        return None
+    digits = "".join(c for c in str(value) if c.isdigit())
+    return digits[:8] if len(digits) >= 8 else None
+
+
+def _upload_date_ok(
+    upload_date,
+    date_after_compact: Optional[str] = None,
+    date_before_compact: Optional[str] = None,
+) -> bool:
+    if not date_after_compact and not date_before_compact:
+        return True
+    if not upload_date:
+        return False
+    day = str(upload_date).replace("-", "")[:8]
+    if date_after_compact and day < date_after_compact:
+        return False
+    if date_before_compact and day > date_before_compact:
+        return False
+    return True
+
+
+def _narrow_to_date_range(
+    videos: list[dict],
+    date_after: Optional[str],
+    date_before: Optional[str],
+    max_videos: Optional[int] = None,
+    min_duration: Optional[float] = None,
+) -> list[dict]:
+    """
+    Channel tabs are newest-first and have no upload_date in the flat list.
+    Look up each video's publish date, skip too-new, keep in-range, stop once
+    we pass date_after (older videos follow).
+    """
+    compact_after = _compact_ymd(date_after)
+    compact_before = _compact_ymd(date_before)
+    if not compact_after and not compact_before:
+        return videos[:max_videos] if max_videos else videos
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "force_generic_extractor": False,
+    }
+    selected: list[dict] = []
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        for v in videos:
+            duration = v.get("duration")
+            date = v.get("upload_date")
+            if not date:
+                try:
+                    info = ydl.extract_info(v["url"], download=False) or {}
+                except Exception:
+                    continue
+                date = info.get("upload_date") or info.get("release_date")
+                duration = info.get("duration") if info.get("duration") is not None else duration
+                v = {
+                    **v,
+                    "upload_date": date,
+                    "duration": duration,
+                    "title": info.get("title") or v.get("title"),
+                }
+            if min_duration is not None and duration is not None and duration < min_duration:
+                continue
+            if not date:
+                continue
+            day = str(date).replace("-", "")[:8]
+            if compact_before and day > compact_before:
+                continue
+            if compact_after and day < compact_after:
+                break
+            selected.append(v)
+            if max_videos and len(selected) >= max_videos:
+                break
+    return selected
+
+
 def _flatten_entries(entries: list) -> list[dict]:
     """Flatten nested playlist entries (from full channel) into a single list of video dicts."""
     result = []
@@ -287,25 +370,31 @@ def _get_channel_videos(
     channel_url: str,
     max_videos: Optional[int] = None,
     all_tabs: bool = True,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    min_duration: Optional[float] = None,
 ) -> list[dict]:
     """
-    Fetch channel video list using yt-dlp. Returns list of {id, title, url, duration}.
+    Fetch a channel video list with yt-dlp.
 
-    When all_tabs=True (default), uses base channel URL to get videos from all tabs
-    (Videos, Shorts, Live), which fetches thousands of videos. When False, uses
-    /videos tab only (faster but may be limited to ~200 videos on large channels).
+    When max_videos is set, list the Videos tab with playlistend so we do not
+    walk the whole catalog (same idea as playlistItems maxResults=50 pages).
+    When max_videos is None and all_tabs=True, walk Videos/Shorts/Live.
     """
-    # Use full channel (all tabs) for complete extraction; /videos tab only when explicitly requested
-    url = _normalize_channel_url(channel_url, videos_tab_only=not all_tabs)
+    date_filter = bool(_compact_ymd(date_after) or _compact_ymd(date_before))
+    capped = max_videos is not None and not date_filter
+    url = _normalize_channel_url(channel_url, videos_tab_only=capped or not all_tabs or date_filter)
     opts = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": True,
         "force_generic_extractor": False,
+        "break_on_reject": True,
     }
-    # playlistend applies to top-level; with all_tabs we have nested playlists, so slice after flatten
-    if max_videos and not all_tabs:
+    if capped and max_videos:
         opts["playlistend"] = max_videos
+    elif date_filter:
+        opts["playlistend"] = 5000
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -313,8 +402,9 @@ def _get_channel_videos(
             raise ValueError("Could not extract channel info")
 
         entries = info.get("entries") or []
-        flat_entries = _flatten_entries(entries) if all_tabs else entries
-        if max_videos and all_tabs:
+        use_nested = all_tabs and not capped and not date_filter
+        flat_entries = _flatten_entries(entries) if use_nested else entries
+        if capped and max_videos:
             flat_entries = flat_entries[:max_videos]
         videos = []
         for e in flat_entries:
@@ -323,15 +413,94 @@ def _get_channel_videos(
             vid = e.get("id")
             if not vid:
                 continue
+            duration = e.get("duration")
+            if min_duration is not None and duration is not None and duration < min_duration:
+                continue
             videos.append(
                 {
                     "id": vid,
                     "title": e.get("title") or "Unknown",
                     "url": f"https://www.youtube.com/watch?v={vid}",
-                    "duration": e.get("duration"),
+                    "duration": duration,
+                    "upload_date": e.get("upload_date") or e.get("release_date"),
                 }
             )
+        if date_filter:
+            return _narrow_to_date_range(
+                videos,
+                date_after,
+                date_before,
+                max_videos=max_videos,
+                min_duration=min_duration,
+            )
         return videos
+
+
+def _format_ymd(value: Optional[str]) -> Optional[str]:
+    compact = _compact_ymd(value)
+    if not compact:
+        return None
+    return f"{compact[0:4]}-{compact[4:6]}-{compact[6:8]}"
+
+
+def _video_upload_date(url: str) -> Optional[str]:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "force_generic_extractor": False,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False) or {}
+        return info.get("upload_date") or info.get("release_date")
+    except Exception:
+        return None
+
+
+def get_channel_overview(channel_url: str) -> dict:
+    """
+    Lightweight channel snapshot for the UI, before a scrape:
+    name, video count, subscribers, tags, oldest/newest publish dates.
+    """
+    url = _normalize_channel_url(channel_url, videos_tab_only=True)
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "force_generic_extractor": False,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        raise ValueError("Could not extract channel info")
+
+    entries = [e for e in (info.get("entries") or []) if e and e.get("id")]
+    newest = entries[0] if entries else None
+    oldest = entries[-1] if entries else None
+    newest_url = f"https://www.youtube.com/watch?v={newest['id']}" if newest else None
+    oldest_url = f"https://www.youtube.com/watch?v={oldest['id']}" if oldest else None
+    newest_date = _video_upload_date(newest_url) if newest_url else None
+    oldest_date = _video_upload_date(oldest_url) if oldest_url else None
+    tags = info.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+
+    return {
+        "channel": info.get("channel") or info.get("uploader") or "Unknown",
+        "channel_id": info.get("channel_id"),
+        "channel_url": info.get("channel_url") or url,
+        "video_count": info.get("playlist_count") or len(entries),
+        "subscriber_count": info.get("channel_follower_count"),
+        "tags": tags[:12],
+        "description": (info.get("description") or "")[:400],
+        "newest_title": (newest or {}).get("title"),
+        "newest_date": _format_ymd(newest_date),
+        "oldest_title": (oldest or {}).get("title"),
+        "oldest_date": _format_ymd(oldest_date),
+        "slug": re.sub(r"[^A-Za-z0-9]+", "", info.get("channel") or info.get("uploader") or "channel") or "channel",
+    }
 
 
 def _format_duration(duration: Optional[float]) -> str:
@@ -443,6 +612,9 @@ def get_channel_metadata(
     delay_seconds: float = 0.5,
     base_videos: Optional[list[dict]] = None,
     fast_playlist_only: bool = False,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    min_duration: Optional[float] = None,
 ) -> list[dict]:
     """
     Fetch channel video metadata (title, URL, duration, views, comments) without transcripts.
@@ -460,10 +632,36 @@ def get_channel_metadata(
     channel_url = _normalize_channel_url(channel_url)
 
     if fast_playlist_only and not full_extraction:
-        return _get_channel_metadata_flat_fast(channel_url, max_videos, progress_callback)
+        rows = _get_channel_videos(
+            channel_url,
+            max_videos,
+            date_after=date_after,
+            date_before=date_before,
+            min_duration=min_duration,
+        )
+        out = []
+        total = len(rows)
+        for i, v in enumerate(rows):
+            if progress_callback:
+                progress_callback(i + 1, total, v.get("title") or "Unknown")
+            out.append(
+                {
+                    **v,
+                    "duration_str": _format_duration(v.get("duration")),
+                    "view_count": v.get("view_count"),
+                    "comment_count": v.get("comment_count"),
+                }
+            )
+        return out
 
     if base_videos is None:
-        base_videos = _get_channel_videos(channel_url, max_videos)
+        base_videos = _get_channel_videos(
+            channel_url,
+            max_videos,
+            date_after=date_after,
+            date_before=date_before,
+            min_duration=min_duration,
+        )
     videos: list[dict] = []
     opts = {"quiet": True, "no_warnings": True, "force_generic_extractor": False}
 
@@ -517,6 +715,7 @@ def get_channel_metadata(
                 "duration_str": _format_duration(e.get("duration")),
                 "view_count": e.get("view_count"),
                 "comment_count": e.get("comment_count"),
+                "upload_date": e.get("upload_date") or e.get("release_date"),
             }
             if full_extraction:
                 row.update(extract_analysis_metadata(e))
@@ -545,11 +744,14 @@ def export_metadata_to_csv(videos: list[dict]) -> str:
     out = io.StringIO()
     writer = csv.writer(out)
     has_full = _has_full_metadata(videos)
+    has_dates = any(v.get("upload_date") for v in videos)
 
     if has_full:
         writer.writerow(
             ["Title", "URL", "Duration", "Views", "Comments", "Upload Date", "Channel", "Likes", "Thumbnail", "Description"]
         )
+    elif has_dates:
+        writer.writerow(["Title", "URL", "Duration", "Views", "Comments", "Upload Date"])
     else:
         writer.writerow(["Title", "URL", "Duration", "Views", "Comments"])
 
@@ -573,6 +775,8 @@ def export_metadata_to_csv(videos: list[dict]) -> str:
                     (v.get("description") or "").replace("\n", " "),
                 ]
             )
+        elif has_dates:
+            row.append(v.get("upload_date") or "")
         writer.writerow(row)
     return out.getvalue()
 
@@ -634,6 +838,8 @@ def scrape_channel(
     output_dir: Optional[str | Path] = None,
     resume: bool = False,
     min_duration: Optional[float] = None,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
 ) -> tuple[list[ScrapedVideo], list[SkippedVideo], int]:
     """
     Scrape a YouTube channel for transcripts (and optional analysis metadata).
@@ -645,7 +851,13 @@ def scrape_channel(
         total_count = len(videos)
         batch = videos[offset : (offset + limit) if limit is not None else len(videos)]
     else:
-        all_videos = _get_channel_videos(channel_url, max_videos)
+        all_videos = _get_channel_videos(
+            channel_url,
+            max_videos,
+            date_after=date_after,
+            date_before=date_before,
+            min_duration=min_duration,
+        )
         total_count = len(all_videos)
         batch = all_videos[offset : (offset + limit) if limit is not None else len(all_videos)]
 
@@ -688,6 +900,15 @@ def scrape_channel(
                     append_skipped(corpus_root, item.to_dict())
                 continue
 
+            compact_after = _compact_ymd(date_after)
+            compact_before = _compact_ymd(date_before)
+            if not _upload_date_ok(v.get("upload_date"), compact_after, compact_before):
+                item = SkippedVideo(video_id=video_id, title=title, reason="Outside date range")
+                skipped.append(item)
+                if corpus_root:
+                    append_skipped(corpus_root, item.to_dict())
+                continue
+
             meta: dict = {}
             if ydl is not None:
                 try:
@@ -695,6 +916,19 @@ def scrape_channel(
                     meta = extract_analysis_metadata(info)
                     duration = info.get("duration") if info.get("duration") is not None else duration
                     title = info.get("title") or title
+                    upload_date = info.get("upload_date") or v.get("upload_date")
+                    if not _upload_date_ok(upload_date, compact_after, compact_before):
+                        item = SkippedVideo(
+                            video_id=video_id,
+                            title=title,
+                            reason="Outside date range",
+                        )
+                        skipped.append(item)
+                        if corpus_root:
+                            append_skipped(corpus_root, item.to_dict())
+                        if delay_seconds > 0:
+                            time.sleep(delay_seconds)
+                        continue
                     if min_duration and duration is not None and duration < min_duration:
                         item = SkippedVideo(
                             video_id=video_id,
